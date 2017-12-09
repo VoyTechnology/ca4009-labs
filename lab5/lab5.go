@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/golang/glog"
@@ -21,6 +22,10 @@ var (
 	queryURLFlag = flag.String("query-url",
 		"http://computing.dcu.ie/~sprocheta/lab5/query/Query_%s.txt",
 		"query url format string")
+	expandedQueryUrlFlag = flag.String("expanded-query-url",
+		"http://computing.dcu.ie/~sprocheta/lab5/expandedQuery/Query_%s.txt",
+		"expanded query url format string",
+	)
 	qrelURLFlag = flag.String("qrel-url",
 		"http://computing.dcu.ie/~sprocheta/lab5/qrels/qrel_%s.txt",
 		"qrel url format string")
@@ -29,6 +34,14 @@ var (
 		"http://clueweb.adaptcentre.ie/ClueWebNew/search",
 		"retrieval url base path")
 	trecEvalPathFlag = flag.String("trec_eval", "", "path to trec_eval")
+)
+
+// QueryType to run
+type QueryType bool
+
+const (
+	BaseQuery     QueryType = false
+	ExpandedQuery           = true
 )
 
 func main() {
@@ -49,6 +62,11 @@ func main() {
 		glog.Fatalf("can't parse queryURL: %v", err)
 	}
 
+	expQueryURL, err := url.Parse(fmt.Sprintf(*expandedQueryUrlFlag, *tokenFlag))
+	if err != nil {
+		glog.Fatalf("can't parse expanded queryURL: %v", err)
+	}
+
 	qrelURL, err := url.Parse(fmt.Sprintf(*qrelURLFlag, *tokenFlag))
 	if err != nil {
 		glog.Fatalf("can't parse qrelURL: %v", err)
@@ -59,8 +77,6 @@ func main() {
 		glog.Fatalf("%v", err)
 	}
 
-	//////////////////////////////////////////////////////////////////////////////
-
 	// Get qrel data
 	qrel, err := getData(qrelURL)
 	if err != nil {
@@ -68,14 +84,54 @@ func main() {
 	}
 	glog.V(1).Infof("Successfully acquired qrel data from %s", qrelURL)
 
+	//////////////////////////////////////////////////////////////////////////////
+	// Normal Queries
+
+	base, err := genBaseline(BaseQuery, queryURL, retrievalURL)
+	if err != nil {
+		glog.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	glog.Info("Running trec_eval")
+	if err = trecEval(ctx, tep, qrel, base); err != nil {
+		glog.Fatalf("Unable to run trec_eval: %v", err)
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Expanded queries
+
+	base, err = genBaseline(ExpandedQuery, expQueryURL, retrievalURL)
+	if err != nil {
+		glog.Fatal(err)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	glog.Info("Running trec_eval")
+	if err = trecEval(ctx, tep, qrel, base); err != nil {
+		glog.Fatalf("Unable to run trec_eval: %v", err)
+	}
+}
+
+func genBaseline(qt QueryType, queryURL, retrievalURL *url.URL) (string, error) {
 	rawQueryRes, err := getData(queryURL)
 	if err != nil {
-		glog.Fatalf("error getting raw query data: %v", err)
+		return "", fmt.Errorf("error getting raw query data: %v", err)
 	}
 	glog.V(1).Infof("Got query data from %s", queryURL)
-	queries, err := getQueries(rawQueryRes)
+
+	var queries []QueryResult
+	switch qt {
+	case BaseQuery:
+		queries, err = getBaseQueries(rawQueryRes)
+	case ExpandedQuery:
+		queries, err = getExpandedQueries(rawQueryRes)
+	}
 	if err != nil {
-		glog.Fatalf("error parsing queries: %v", err)
+		return "", fmt.Errorf("error parsing queries: %v", err)
 	}
 	baseline := []BaseData{}
 	for _, query := range queries {
@@ -110,15 +166,7 @@ func main() {
 	for _, b := range baseline {
 		base += b.String()
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	glog.Info("Running trec_eval")
-	if err = trecEval(ctx, tep, qrel, base); err != nil {
-		glog.Fatalf("Unable to run trec_eval: %v", err)
-	}
-
+	return base, nil
 }
 
 // BaseData which is used for running trec_eval
@@ -147,7 +195,8 @@ type QueryResult struct {
 // queryData can be ignored as it just has the data of the full query including
 // the unnecessary top
 type queryData struct {
-	Top []QueryResult `xml:"top"`
+	Top      []QueryResult `xml:"top"`
+	Expanded string
 }
 
 func getData(path *url.URL) (string, error) {
@@ -160,13 +209,30 @@ func getData(path *url.URL) (string, error) {
 	return string(body), err
 }
 
-func getQueries(body string) ([]QueryResult, error) {
+func getBaseQueries(body string) ([]QueryResult, error) {
 	body = fmt.Sprintf("<data>%s</data>", body)
 	var qd queryData
 	if err := xml.Unmarshal([]byte(body), &qd); err != nil {
 		return nil, err
 	}
 	return qd.Top, nil
+}
+
+func getExpandedQueries(body string) ([]QueryResult, error) {
+	var expanded []string
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(line, "<") {
+			expanded = append(expanded, line)
+		}
+	}
+	res, err := getBaseQueries(body)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < len(res); i++ {
+		res[i].Title = expanded[i]
+	}
+	return res, nil
 }
 
 // SearchResult containing the parsed JSON from the search page.
