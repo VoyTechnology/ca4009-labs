@@ -114,9 +114,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	glog.Info("Running trec_eval")
 	if err = trecEval(ctx, tep, qrel, base); err != nil {
 		glog.Fatalf("Unable to run trec_eval: %v", err)
 	}
+
 }
 
 // BaseData which is used for running trec_eval
@@ -178,7 +180,6 @@ type SearchResult struct {
 
 func getSearch(body string) ([]SearchResult, error) {
 	var sr [][]SearchResult
-	// sr := make(map[string]interface{})
 	if err := json.Unmarshal([]byte(body), &sr); err != nil {
 		return nil, err
 	}
@@ -195,7 +196,7 @@ func trecEval(ctx context.Context, tep string, qrel string, base string) error {
 	if err != nil {
 		return fmt.Errorf("can't create qrel tmp file: %v", err)
 	}
-	// defer os.Remove(qrelTmp.Name())
+	defer os.Remove(qrelTmp.Name())
 	if _, err = qrelTmp.WriteString(qrel); err != nil {
 		return fmt.Errorf("can't write qrel: %v", err)
 	}
@@ -204,7 +205,7 @@ func trecEval(ctx context.Context, tep string, qrel string, base string) error {
 	if err != nil {
 		return fmt.Errorf("can't create base tmp file: %v", err)
 	}
-	// defer os.Remove(baseTmp.Name())
+	defer os.Remove(baseTmp.Name())
 	if _, err = baseTmp.WriteString(base); err != nil {
 		return fmt.Errorf("can't write base: %v", err)
 	}
@@ -214,7 +215,7 @@ func trecEval(ctx context.Context, tep string, qrel string, base string) error {
 	if err != nil {
 		return fmt.Errorf("error running trec_eval: %v", err)
 	}
-	fmt.Println(out)
+	fmt.Println(string(out))
 
 	return nil
 }
