@@ -22,7 +22,7 @@ var (
 	queryURLFlag = flag.String("query-url",
 		"http://computing.dcu.ie/~sprocheta/lab5/query/Query_%s.txt",
 		"query url format string")
-	expandedQueryUrlFlag = flag.String("expanded-query-url",
+	expandedQueryURLFlag = flag.String("expanded-query-url",
 		"http://computing.dcu.ie/~sprocheta/lab5/expandedQuery/Query_%s.txt",
 		"expanded query url format string",
 	)
@@ -39,6 +39,7 @@ var (
 // QueryType to run
 type QueryType bool
 
+// Types of queries
 const (
 	BaseQuery     QueryType = false
 	ExpandedQuery           = true
@@ -62,7 +63,7 @@ func main() {
 		glog.Fatalf("can't parse queryURL: %v", err)
 	}
 
-	expQueryURL, err := url.Parse(fmt.Sprintf(*expandedQueryUrlFlag, *tokenFlag))
+	expQueryURL, err := url.Parse(fmt.Sprintf(*expandedQueryURLFlag, *tokenFlag))
 	if err != nil {
 		glog.Fatalf("can't parse expanded queryURL: %v", err)
 	}
